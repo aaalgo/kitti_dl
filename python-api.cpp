@@ -19,18 +19,34 @@ namespace {
     using std::endl;
     using std::vector;
 
+    template <typename T=float>
+    void check_dense (np::ndarray array, int nd = 0) {
+        CHECK(array.get_dtype() == np::dtype::get_builtin<T>());
+        if (nd > 0) {
+            CHECK(array.get_nd() == nd);
+        }
+        else {
+            nd = array.get_nd();
+        }
+        int stride = sizeof(T);
+        for (int i = 0, off=nd-1; i < nd; ++i, --off) {
+            CHECK(array.strides(off) == stride);
+            stride *= array.shape(off);
+        }
+    }
+
     class Voxelizer {
         float x_min, x_max, x_factor;
         float y_min, y_max, y_factor;
         float z_min, z_max, z_factor;
         int nx, ny, nz;
+        float lower_th, upper_th;
     public:
         Voxelizer (np::ndarray ranges,
-                   np::ndarray shape) {
+                   np::ndarray shape, float lower_th_, float upper_th_): lower_th(lower_th_), upper_th(upper_th_) {
             // ranges is a 3 * 2 arrange
             {
-                CHECK(ranges.get_nd() == 2);
-                CHECK(ranges.get_dtype() == np::dtype::get_builtin<float>());
+                check_dense<float>(ranges, 2);
                 int D = ranges.shape(0);
                 int W = ranges.shape(1);
                 CHECK(D == 3);
@@ -98,7 +114,7 @@ namespace {
                 CHECK(points.strides(1) == int(sizeof(float)));
 
                 vector<unsigned> index(N);
-                for (unsigned j = 0; j < N; ++j) index[j] = j;
+                for (int j = 0; j < N; ++j) index[j] = j;
                 std::random_shuffle(index.begin(), index.end());
 
                 for (unsigned j: index) {
@@ -115,7 +131,7 @@ namespace {
                     if (iz < 0 || iz >= nz) continue;
 
                     int cell = i * nv + (ix * ny + iy) * nz + iz;
-                    if (voxels[cell].size() < T) {
+                    if (int(voxels[cell].size()) < T) {
                         voxels[cell].push_back(ptr);
                     }
                 }
@@ -205,7 +221,45 @@ namespace {
             return py::make_tuple(V);
         }
 
-        py::tuple voxelize_labels (py::list list, np::ndarray priors, int downsize) { //np::ndarray labels, int downsize) {
+        static cv::Rect_<float> make_rect (cv::Point2f const &pt,
+                                    float width, float height) {
+            return cv::Rect_<float>(pt.x - width/2,
+                                    pt.y - height/2,
+                                    width, height);
+        }
+
+        static float anchor_score (cv::Point2f pt, float const *prior, float const *box) {
+            //float w = box[4];
+            //float l = box[5];
+            float d = box[7];
+            cv::Rect_<float> p = make_rect(pt, prior[0], prior[1]);
+            cv::Rect_<float> r = make_rect(cv::Point2f(box[0], box[1]), d, d);
+            cv::Rect_<float> u = p & r;
+            float i = u.area();
+            return i / (p.area() + r.area() - i + 0.00001);
+        }
+
+        static void anchor_update_params (cv::Point2f pt, float const *box, float *params) {
+            float x = box[0];
+            float y = box[1];
+            float z = box[2];
+            float h = box[3];
+            float w = box[4];
+            float l = box[5];
+            float t = box[6];
+            float d = box[7];
+            params[0] = x - pt.x;
+            params[1] = y - pt.y;
+            params[2] = z;
+            params[3] = h;
+            params[4] = w;
+            params[5] = l;
+            params[6] = t;
+            params[7] = d;
+        }
+
+        py::tuple voxelize_labels (py::list list, np::ndarray priors, int downsize) {
+            check_dense<float>(priors, 2);
             int batch = py::len(list);
             CHECK(nz % downsize == 0);
             CHECK(ny % downsize == 0);
@@ -215,20 +269,121 @@ namespace {
             //int lz = nz / downsize;
 
             CHECK(priors.get_nd() == 2);
-            int params = 4; //priors.shape(1);
+            int params = 8; //priors.shape(1);
             // anchors and masks
             np::ndarray A = np::zeros(py::make_tuple(batch, lx, ly, priors.shape(0)), np::dtype::get_builtin<float>());
+            check_dense<float>(A);
             np::ndarray AW = np::zeros(py::make_tuple(batch, lx, ly, priors.shape(0)), np::dtype::get_builtin<float>());
+            AW += 1.0;
+            check_dense<float>(AW);
             // parameters and masks
             np::ndarray P = np::zeros(py::make_tuple(batch, lx, ly, priors.shape(0) * params), np::dtype::get_builtin<float>());
+            check_dense<float>(P);
             np::ndarray PW = np::zeros(py::make_tuple(batch, lx, ly, priors.shape(0)), np::dtype::get_builtin<float>());
+            check_dense<float>(PW);
 
-            /*
-            int P_voxel_stride = T * C;
-            CHECK(nv * P_voxel_stride * int(sizeof(float)) == P.strides(0));
-            float *pp = (float *)P.get_data();
-            */
+            int count = 0;
+            for (int i = 0; i < batch; ++i) {
+                np::ndarray boxes = py::extract<np::ndarray>(list[i]);
+                check_dense<float>(boxes, 2);
+                if (boxes.shape(0) == 0) continue;
+                float min_z = 100;
+                float max_z = -100;
+                
+                /*
+                for (int b = 0; b < boxes.shape(0); ++b) {
+                    float const *box = (float const *)(boxes.get_data() + b * boxes.strides(0));
+                    if (box[2] > max_z) max_z = box[2];
+                    if (box[2] < min_z) min_z = box[2];
+                    std::cerr << "BOX " << box[0] << ' ' << box[1] << ' ' << box[4] << ' ' << box[5] << ' ' << box[7] << std::endl;
+                }
+                std::cerr << "Z " << min_z << " " << max_z << std::endl;
+                */
+
+                float *pa = (float *)(A.get_data() + A.strides(0) * i);
+                float *paw = (float *)(AW.get_data() + AW.strides(0) * i);
+                float *pp = (float *)(P.get_data() + P.strides(0) * i);
+                float *ppw = (float *)(PW.get_data() + PW.strides(0) * i);
+                for (int x = 0; x < lx; ++x) {
+                    for (int y = 0; y < ly; ++y) {
+                        // find closest shape
+                        cv::Point2f pt(x * downsize / x_factor + x_min, y * downsize / y_factor + y_min);
+                        for (int k = 0; k < priors.shape(0); ++k,
+                                pa += 1, paw +=1,
+                                pp += params, ppw += 1) {
+                            float const *prior = (float const *)(priors.get_data() + k * priors.strides(0));
+                            float const *best_box = nullptr;
+                            float best_d = 0;
+                            for (int b = 0; b < boxes.shape(0); ++b) {
+                                float const *box = (float const *)(boxes.get_data() + b * boxes.strides(0));
+                                // TODO: what if a pixel belongs to two shapes
+                                float d = anchor_score(pt, prior, box); 
+                                if (d > best_d) {   // find best circle
+                                    best_d = d;
+                                    best_box = box;
+                                }
+                            }
+                            if (!best_box) continue;
+                            if (best_d >= lower_th) {
+                                anchor_update_params(pt, best_box, pp);
+                                ppw[0] = 1.0; //best_c->weight;
+                                ++count;
+                                if (best_d < upper_th) {
+                                    paw[0] = 0;
+                                }
+                                else {
+                                    pa[0] = 1;      // to class label
+                                }
+                            }
+                        } // prior
+                    } // x
+                } // y
+            } // batch
             return py::make_tuple(A, AW, P, PW);
+        }
+
+        py::list generate_boxes (np::ndarray probs, np::ndarray params, float anchor_th) {
+            check_dense<float>(probs, 4);
+            check_dense<float>(params, 4);
+            int batch = probs.shape(0);
+            int lx = probs.shape(1); //nx / downsize;
+            int ly = probs.shape(2); //ny / downsize;
+            CHECK(nx % lx == 0);
+            CHECK(ny % ly == 0);
+            int downsize = nx / lx;
+            CHECK(ny / ly == downsize);
+            CHECK(params.shape(1) == lx);
+            CHECK(params.shape(2) == ly);
+            CHECK(params.shape(3) % probs.shape(3) == 0);
+            int n_params = params.shape(3) / probs.shape(3);
+
+            py::list list;
+            for (int i = 0; i < batch; ++i) {
+                float *pa = (float *)(probs.get_data() + probs.strides(0) * i);
+                float *pp = (float *)(params.get_data() + params.strides(0) * i);
+                py::list boxes;
+                for (int x = 0; x < lx; ++x) {
+                    for (int y = 0; y < ly; ++y) {
+                        cv::Point2f pt(x * downsize / x_factor + x_min, y * downsize / y_factor + y_min);
+                        // check all the priors
+                        for (int k = 0; k < probs.shape(3); ++k, pa += 1, pp += n_params) {
+                            float prob = pa[0];
+                            if (prob < anchor_th) continue;
+                            float x = pp[0] + pt.x;
+                            float y = pp[1] + pt.y;
+                            float z = pp[2];
+                            float h = pp[3];
+                            float w = pp[4];
+                            float l = pp[5];
+                            float t = pp[6];
+                            float d = pp[7];
+                            boxes.append(py::make_tuple(x, y, z, h, w, l, t, d));
+                        } // prior
+                    } // x
+                } // y
+                list.append(boxes);
+            } // batch
+            return list;
         }
     };
 }
@@ -236,10 +391,11 @@ namespace {
 BOOST_PYTHON_MODULE(cpp)
 {
     np::initialize();
-    py::class_<Voxelizer>("Voxelizer", py::init<np::ndarray, np::ndarray>())
+    py::class_<Voxelizer>("Voxelizer", py::init<np::ndarray, np::ndarray, float, float>())
         .def("voxelize_points", &Voxelizer::voxelize_points)
         .def("make_dense", &Voxelizer::make_dense)
         .def("voxelize_labels", &Voxelizer::voxelize_labels)
+        .def("generate_boxes", &Voxelizer::generate_boxes)
     ;
 }
 

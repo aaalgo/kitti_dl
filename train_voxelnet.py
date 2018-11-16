@@ -11,20 +11,13 @@ import cpp
 from kitti import *
 
 flags = tf.app.flags
+flags.DEFINE_string('test_db', None, 'test db')
 FLAGS = flags.FLAGS
 
-'''
-flags.DEFINE_integer('max_points', 10000, '')
-
-SAMPLE_DEPTH = 32
-SAMPLE_SZ = 256
-DOWNSIZE = 2
-
-'''
 T = 32
 RANGES = [[0, 70.4],    # X
           [-40, 40],    # Y
-          [-3, 1]]      # Z
+          [-1, 3]]      # Z
 INPUT_SHAPE = [352, 400, 8]
 
 
@@ -58,15 +51,17 @@ class Stream:
                     random.shuffle(samples)
                     pass
                 for pk in samples:
-                    sample = Sample(pk, LOAD_VELO | LOAD_CALIB | LOAD_LABEL2, is_training=True)
+                    sample = Sample(pk, LOAD_VELO | LOAD_LABEL2, is_training=True)
                     # note that Sample's is_training is True for both training and validation
 
                     meta = lambda: None
                     setattr(meta, 'ids', np.zeros((1,)))
 
-                    assert sample.points.shape[1] == 4, 'channels should be %d.' % sample.points.shape[1]
+                    points = sample.get_points_swapped()
 
-                    points, mask, index = self.vxl.voxelize_points([sample.points], T)
+                    assert points.shape[1] == 4, 'channels should be %d.' % sample.points.shape[1]
+
+                    points, mask, index = self.vxl.voxelize_points([points], T)
 
                     boxes = sample.get_boxes_array(["Car"])
                     anchors, anchors_weight, params, params_weight = self.vxl.voxelize_labels([boxes], np.array(self.priors, dtype=np.float32), FLAGS.rpn_stride)
@@ -115,7 +110,7 @@ class VoxelNet (rpn.RPN):
 
     def __init__ (self):
         super().__init__()
-        self.vxl = cpp.Voxelizer(np.array(RANGES, dtype=np.float32), np.array(INPUT_SHAPE, dtype=np.int32))
+        self.vxl = cpp.Voxelizer(np.array(RANGES, dtype=np.float32), np.array(INPUT_SHAPE, dtype=np.int32), FLAGS.lower_th, FLAGS.upper_th)
         pass
 
     def vfe (self, net, mask):
@@ -164,6 +159,18 @@ class VoxelNet (rpn.RPN):
         self.backbone = net
         pass
 
+    def rpn_params_size (self):
+        return 8
+
+    def rpn_params_loss (self, params, gt_params, priors):
+        # params        ? * priors * 7
+        # gt_params     ? * priors * 7
+        # priors        1 * priors * 2
+
+        #gt_params = gt_params / priors
+        l1 = tf.losses.huber_loss(params, gt_params, reduction=tf.losses.Reduction.NONE, loss_collection=None)
+        return tf.reduce_sum(l1, axis=2)
+
     def rpn_logits (self, channels, strides):
         assert strides == 2
         return tf.layers.conv2d(self.backbone, channels, 1, strides=1, activation=None, padding='SAME')
@@ -171,10 +178,8 @@ class VoxelNet (rpn.RPN):
     def rpn_params (self, channels, strides):
         return tf.layers.conv2d(self.backbone, channels, 1, strides=1, activation=None, padding='SAME')
 
-    def rpn_non_max_supression (self, boxes, index, prob):
-        nms_max = tf.constant(FLAGS.nms_max, dtype=tf.int32, name="nms_max")
-        nms_th = tf.constant(FLAGS.nms_th, dtype=tf.float32, name="nms_th")
-        return tf.image.non_max_suppression(rpn.shift_boxes(boxes, index), prob, nms_max, iou_threshold=nms_th)
+    def rpn_generate_shapes (self, shape, anchor_params, priors, n_priors):
+        return None
 
     def build_graph (self):
         self.is_training = tf.placeholder(tf.bool, name="is_training")
@@ -196,6 +201,7 @@ class VoxelNet (rpn.RPN):
         net, = tf.py_func(self.vxl.make_dense, [net, self.index], [tf.float32])
         net = tf.reshape(net, (FLAGS.batch, X, Y, Z, 128))
 
+        self.voxel_features = net
         net = self.middle(net)
         net = tf.reshape(net, (FLAGS.batch, X, Y, -1))
 
@@ -217,18 +223,24 @@ class VoxelNet (rpn.RPN):
                 self.is_training: is_training}
     pass
 
-
-def main (_):
-    #./train.py --classes 2 --db data/multi_train_trim.list  --val_db data/multi_val_trim.list --epoch_steps 20 --ckpt_epochs 1 --val_epochs 1000
+def setup_params ():
     FLAGS.channels = 7
     FLAGS.classes = None    # we shouldn't need this
     FLAGS.db = 'kitti_data/train.txt'
     FLAGS.val_db = 'kitti_data/val.txt'
+    FLAGS.test_db = 'kitti_data/test.txt'
     FLAGS.epoch_steps = 100
     FLAGS.ckpt_epochs = 1
     FLAGS.val_epochs = 1000
-    FLAGS.model = "vxlnet"
     FLAGS.rpn_stride = 2
+    FLAGS.lower_th = 0.1 #45
+    FLAGS.upper_th = 0.2
+    pass
+
+def main (_):
+    setup_params()
+    FLAGS.model = "vxlnet"
+    #./train.py --classes 2 --db data/multi_train_trim.list  --val_db data/multi_val_trim.list --epoch_steps 20 --ckpt_epochs 1 --val_epochs 1000
     model = VoxelNet()
     aardvark.train(model)
     pass

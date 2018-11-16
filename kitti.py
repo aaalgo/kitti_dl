@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import os
+import math
 import numpy as np
 import cv2
 
@@ -9,10 +10,9 @@ DATA_ROOT = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'kitti_data
 LOAD_IMAGE2 = 0x01
 LOAD_IMAGE3 = 0x02
 LOAD_VELO = 0x04
-LOAD_CALIB = 0x08
-LOAD_LABEL2 = 0x10
+LOAD_LABEL2 = 0x8
 
-LOAD_ALL = LOAD_IMAGE2 | LOAD_IMAGE3 | LOAD_VELO | LOAD_CALIB | LOAD_LABEL2
+LOAD_ALL = LOAD_IMAGE2 | LOAD_IMAGE3 | LOAD_VELO | LOAD_LABEL2
 
 TYPES = ['Car', 'Van', 'Truck', 'Pedestrian', 'Person_sitting', 'Cyclist', 'Tram', 'Misc', 'DontCare']
 
@@ -110,18 +110,49 @@ class Sample:
             self.image3 = cv2.imread(os.path.join(root, 'image_3/%06d.png' % pk), cv2.IMREAD_COLOR)
             pass
         if load_flags | LOAD_VELO:
-            self.points = load_points(os.path.join(root, 'velodyne/%06d.bin' % pk))
-            pass
-        if load_flags | LOAD_CALIB:
             self.calib = load_calib(os.path.join(root, 'calib/%06d.txt' % pk))
+            self.points = load_points(os.path.join(root, 'velodyne/%06d.bin' % pk))
+            #points = points @ self.calib.Tr_velo_to_cam.T
             pass
         if load_flags | LOAD_LABEL2:
             self.label2 = load_label2(os.path.join(root, 'label_2/%06d.txt' % pk))
             pass
         pass
 
+    def get_points_swapped (self):
+        points = self.points
+        C3 = points[:, 3]
+        points[:, 3] = 1.0
+        points = points @ self.calib.Tr_velo_to_cam.T
+        points[:, 3] = C3;
+        points = np.copy(points[:, [2, 0, 1, 3]].astype(np.float32), order='C')
+        return points
+
     def get_boxes_array (self, types):
-        return np.zeros((0, 7), dtype=np.float32)
+
+        boxes = []
+        for obj in self.label2:
+            if obj.type in types:
+                x, y, z = obj.loc
+                h, w, l = obj.dim
+                boxes.append([z, x, y, h, w, l, obj.rot, math.sqrt(w * w + l * l)])
+                pass
+            pass
+        if len(boxes) == 0:
+            return np.zeros((0, 8), dtype=np.float32)
+        return np.array(boxes, dtype=np.float32)
+
+    def load_boxes_array (self, array, type1):
+        boxes = []
+        for row in array:
+            box = empty_object()
+            box.type = type1
+            z, x, y, h, w, l, box.rot, _ = row
+            box.loc = (x, y, z)
+            box.dim = (h, w, l)
+            boxes.append(box)
+            pass
+        self.label2 = boxes
     pass
 
 def draw_box3d (image, obj, calib):
@@ -148,8 +179,8 @@ def draw_box3d (image, obj, calib):
     for i1, i2 in lines[8:]:
         cv2.line(image, pts[i1], pts[i2], (0, 255, 0))
 
-    left, top = [int(round(x)) for x in obj.bbox[:2]]
-    cv2.putText(image, obj.type[:4], (left, top-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,(255,255,255),1,cv2.LINE_AA)
+    #left, top = [int(round(x)) for x in obj.bbox[:2]]
+    #cv2.putText(image, obj.type[:4], (left, top-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,(255,255,255),1,cv2.LINE_AA)
     pass
 
 if __name__ == '__main__':
