@@ -35,12 +35,94 @@ namespace {
         }
     }
 
+    class Box {
+        float x, y, z, l, w, h, t, d;
+        cv::Rect_<float> rect;
+
+        static cv::Rect_<float> make_rect (cv::Point2f const &pt,
+                                    float width, float height) {
+            return cv::Rect_<float>(pt.x - width/2,
+                                    pt.y - height/2,
+                                    width, height);
+        }
+    public:
+        void load (float const *params) {
+            x = params[0];
+            y = params[1];
+            z = params[2];
+            h = params[3];
+            w = params[4];
+            l = params[5];
+            t = params[6];
+            d = params[7];
+            rect = make_rect(cv::Point2f(x, y), d, d);
+        }
+
+        void store (float *params) {
+            params[0] = x;
+            params[1] = y;
+            params[2] = z;
+            params[3] = h;
+            params[4] = w;
+            params[5] = l;
+            params[6] = t;
+            params[7] = d;
+        }
+
+        py::tuple make_tuple () const {
+            return py::make_tuple(x, y, z, h, w, l, t, d);
+        }
+
+        void to_residual (cv::Point2f pt, float const *prior, float *params) const {
+            params[0] = x - pt.x;
+            params[1] = y - pt.y;
+            params[2] = z;
+            params[3] = h;
+            params[4] = w;
+            params[5] = l;
+            params[6] = t;
+            params[7] = d;
+        }
+
+        void from_residual (cv::Point2f pt, float const *prior, float const *params) {
+            x = params[0] + pt.x;
+            y = params[1] + pt.y;
+            z = params[2];
+            h = params[3];
+            w = params[4];
+            l = params[5];
+            t = params[6];
+            d = params[7];
+            rect = make_rect(cv::Point2f(x, y), d, d);
+        }
+
+        float score_anchor (cv::Point2f pt, float const *prior) const {
+            cv::Rect_<float> p = make_rect(pt, prior[0], prior[1]);
+            cv::Rect_<float> u = p & rect;
+            float i = u.area();
+            return i / (p.area() + rect.area() - i + 0.00001);
+        }
+    };
+
+    class Boxes: public vector<Box> {
+    public:
+        Boxes (np::ndarray array) {
+            check_dense<float>(array, 2);
+            resize(array.shape(0));
+            for (int b = 0; b < array.shape(0); ++b) {
+                at(b).load((float const *)(array.get_data() + b * array.strides(0)));
+            }
+        };
+    };
+
+
     class Voxelizer {
         float x_min, x_max, x_factor;
         float y_min, y_max, y_factor;
         float z_min, z_max, z_factor;
         int nx, ny, nz;
         float lower_th, upper_th;
+        std::default_random_engine rng;
     public:
         Voxelizer (np::ndarray ranges,
                    np::ndarray shape, float lower_th_, float upper_th_): lower_th(lower_th_), upper_th(upper_th_) {
@@ -221,43 +303,6 @@ namespace {
             return py::make_tuple(V);
         }
 
-        static cv::Rect_<float> make_rect (cv::Point2f const &pt,
-                                    float width, float height) {
-            return cv::Rect_<float>(pt.x - width/2,
-                                    pt.y - height/2,
-                                    width, height);
-        }
-
-        static float anchor_score (cv::Point2f pt, float const *prior, float const *box) {
-            //float w = box[4];
-            //float l = box[5];
-            float d = box[7];
-            cv::Rect_<float> p = make_rect(pt, prior[0], prior[1]);
-            cv::Rect_<float> r = make_rect(cv::Point2f(box[0], box[1]), d, d);
-            cv::Rect_<float> u = p & r;
-            float i = u.area();
-            return i / (p.area() + r.area() - i + 0.00001);
-        }
-
-        static void anchor_update_params (cv::Point2f pt, float const *box, float *params) {
-            float x = box[0];
-            float y = box[1];
-            float z = box[2];
-            float h = box[3];
-            float w = box[4];
-            float l = box[5];
-            float t = box[6];
-            float d = box[7];
-            params[0] = x - pt.x;
-            params[1] = y - pt.y;
-            params[2] = z;
-            params[3] = h;
-            params[4] = w;
-            params[5] = l;
-            params[6] = t;
-            params[7] = d;
-        }
-
         py::tuple voxelize_labels (py::list list, np::ndarray priors, int downsize) {
             check_dense<float>(priors, 2);
             int batch = py::len(list);
@@ -284,9 +329,8 @@ namespace {
 
             int count = 0;
             for (int i = 0; i < batch; ++i) {
-                np::ndarray boxes = py::extract<np::ndarray>(list[i]);
-                check_dense<float>(boxes, 2);
-                if (boxes.shape(0) == 0) continue;
+                Boxes boxes(py::extract<np::ndarray>(list[i]));
+                if (boxes.empty()) continue;
                 float min_z = 100;
                 float max_z = -100;
                 
@@ -312,20 +356,18 @@ namespace {
                                 pa += 1, paw +=1,
                                 pp += params, ppw += 1) {
                             float const *prior = (float const *)(priors.get_data() + k * priors.strides(0));
-                            float const *best_box = nullptr;
+                            Box const *best_box = nullptr;
                             float best_d = 0;
-                            for (int b = 0; b < boxes.shape(0); ++b) {
-                                float const *box = (float const *)(boxes.get_data() + b * boxes.strides(0));
-                                // TODO: what if a pixel belongs to two shapes
-                                float d = anchor_score(pt, prior, box); 
+                            for (auto const &box: boxes) {
+                                float d = box.score_anchor(pt, prior); 
                                 if (d > best_d) {   // find best circle
                                     best_d = d;
-                                    best_box = box;
+                                    best_box = &box;
                                 }
                             }
                             if (!best_box) continue;
                             if (best_d >= lower_th) {
-                                anchor_update_params(pt, best_box, pp);
+                                best_box->to_residual(pt, prior, pp);
                                 ppw[0] = 1.0; //best_c->weight;
                                 ++count;
                                 if (best_d < upper_th) {
@@ -342,9 +384,10 @@ namespace {
             return py::make_tuple(A, AW, P, PW);
         }
 
-        py::list generate_boxes (np::ndarray probs, np::ndarray params, float anchor_th) {
+        py::list generate_boxes (np::ndarray probs, np::ndarray params, np::ndarray priors, float anchor_th) {
             check_dense<float>(probs, 4);
             check_dense<float>(params, 4);
+            check_dense<float>(priors, 2);
             int batch = probs.shape(0);
             int lx = probs.shape(1); //nx / downsize;
             int ly = probs.shape(2); //ny / downsize;
@@ -355,6 +398,7 @@ namespace {
             CHECK(params.shape(1) == lx);
             CHECK(params.shape(2) == ly);
             CHECK(params.shape(3) % probs.shape(3) == 0);
+            CHECK(probs.shape(3) == priors.shape(0));
             int n_params = params.shape(3) / probs.shape(3);
 
             py::list list;
@@ -369,21 +413,26 @@ namespace {
                         for (int k = 0; k < probs.shape(3); ++k, pa += 1, pp += n_params) {
                             float prob = pa[0];
                             if (prob < anchor_th) continue;
-                            float x = pp[0] + pt.x;
-                            float y = pp[1] + pt.y;
-                            float z = pp[2];
-                            float h = pp[3];
-                            float w = pp[4];
-                            float l = pp[5];
-                            float t = pp[6];
-                            float d = pp[7];
-                            boxes.append(py::make_tuple(x, y, z, h, w, l, t, d));
+                            float const *prior = (float const *)(priors.get_data() + k * priors.strides(0));
+                            Box box;
+                            box.from_residual(pt, prior, pp);
+                            boxes.append(box.make_tuple());
                         } // prior
                     } // x
                 } // y
                 list.append(boxes);
             } // batch
             return list;
+        }
+
+        void augment (np::ndarray points, np::ndarray boxes) {
+            // rotate by z
+            // shift by z
+            std::uniform_real_distribution<float> scale(0.95, 1.05);
+            std::uniform_real_distribution<float> rotate(-M_PI/4, M_PI/4);
+            float s = scale(rng);
+            float r = rotate(rng);
+            // TODO
         }
     };
 }
@@ -396,6 +445,7 @@ BOOST_PYTHON_MODULE(cpp)
         .def("make_dense", &Voxelizer::make_dense)
         .def("voxelize_labels", &Voxelizer::voxelize_labels)
         .def("generate_boxes", &Voxelizer::generate_boxes)
+        .def("augment", &Voxelizer::augment)
     ;
 }
 

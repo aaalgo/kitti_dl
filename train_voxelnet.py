@@ -63,9 +63,10 @@ class Stream:
 
                     points = sample.get_voxelnet_points()
                     assert points.shape[1] == 4, 'channels should be %d.' % sample.points.shape[1]
-                    points, mask, index = self.vxl.voxelize_points([points], T)
-
                     boxes = sample.get_voxelnet_boxes(["Car"])
+
+                    self.vxl.augment(points, boxes)
+                    points, mask, index = self.vxl.voxelize_points([points], T)
                     anchors, anchors_weight, params, params_weight = self.vxl.voxelize_labels([boxes], np.array(self.priors, dtype=np.float32), FLAGS.rpn_stride)
                     yield meta, points, mask, index, anchors, anchors_weight, params, params_weight
                 if not self.is_training:
@@ -225,8 +226,10 @@ def setup_params ():
     FLAGS.ckpt_epochs = 1
     FLAGS.val_epochs = 10000
     FLAGS.rpn_stride = 2
-    FLAGS.lower_th = 0.45
-    FLAGS.upper_th = 0.60
+    FLAGS.lower_th = 0.1 #0.45
+    FLAGS.upper_th = 0.3 #0.60
+    FLAGS.rpn_positive_extra = 0.5
+    FLAGS.decay_steps = 1000
     pass
 
 def main (_):
