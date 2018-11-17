@@ -119,7 +119,9 @@ class Sample:
             pass
         pass
 
-    def get_points_swapped (self):
+    # voxel net use different meaning of X Y Z
+    # and axis need to be swapped
+    def get_voxelnet_points (self):
         points = self.points
         C3 = points[:, 3]
         points[:, 3] = 1.0
@@ -128,7 +130,7 @@ class Sample:
         points = np.copy(points[:, [2, 0, 1, 3]].astype(np.float32), order='C')
         return points
 
-    def get_boxes_array (self, types):
+    def get_voxelnet_boxes (self, types):
 
         boxes = []
         for obj in self.label2:
@@ -142,7 +144,7 @@ class Sample:
             return np.zeros((0, 8), dtype=np.float32)
         return np.array(boxes, dtype=np.float32)
 
-    def load_boxes_array (self, array, type1):
+    def load_voxelnet_boxes (self, array, type1):
         boxes = []
         for row in array:
             box = empty_object()

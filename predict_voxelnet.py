@@ -35,7 +35,7 @@ def main (_):
             for l in f:
                 pk = int(l.strip())
                 sample = Sample(pk, LOAD_IMAGE2 | LOAD_VELO | LOAD_LABEL2, is_training=is_val)
-                points = sample.get_points_swapped()
+                points = sample.get_voxlnet_points()
                 points, mask, index = model.vxl.voxelize_points([points], T)
                 feed_dict = {model.is_training: False,
                              model.points: points,
@@ -44,11 +44,11 @@ def main (_):
 
                 if is_val:
                     # for validation set, produce the ground-truth boxes
-                    boxes_gt = sample.get_boxes_array(["Car"])
+                    boxes_gt = sample.get_voxelnet_boxes(["Car"])
                     if False:   # 2 lines below are for testing the C++ code
                         probs_gt, _, params_gt, _ = model.vxl.voxelize_labels([boxes_gt], np.array(model.priors, dtype=np.float32), FLAGS.rpn_stride)
                         boxes_bt = model.vxl.generate_boxes(probs_gt, params_gt, FLAGS.anchor_th)
-                    sample.load_boxes_array(boxes_gt, 'Car')
+                    sample.load_voxelnet_boxes(boxes_gt, 'Car')
                     # visualize groundtruth labels
                     image3d = np.copy(sample.image2)
                     for box in sample.label2:
@@ -61,7 +61,7 @@ def main (_):
                 boxes = model.vxl.generate_boxes(probs, params, FLAGS.anchor_th)
                 boxes = boxes[0]
                 print(np.max(probs), len(boxes))
-                sample.load_boxes_array(boxes, 'Car')
+                sample.load_voxelnet_boxes(boxes, 'Car')
 
                 image3d = np.copy(sample.image2)
                 for box in sample.label2:
