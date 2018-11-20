@@ -45,6 +45,12 @@ class Stream:
         self.reset()
         pass
 
+    def size (self):
+        return self.sz
+
+    def next (self):
+        return self.impl.next()
+
     def reset (self):
         samples = self.samples
         is_training = self.is_training
@@ -61,12 +67,6 @@ class Stream:
                     break
         self.impl = cpp.Streamer(generator(), RANGES, INPUT_SHAPE, np.array(self.priors, dtype=np.float32), FLAGS.rpn_stride, T, FLAGS.lower_th, FLAGS.upper_th)
         pass
-
-    def size (self):
-        return self.sz
-
-    def next (self):
-        return self.impl.next()
 
 def conv2d (net, ch, kernel, strides, is_training):
     net = tf.layers.conv2d(net, ch, kernel, strides, padding='same')

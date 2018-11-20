@@ -59,6 +59,7 @@ def main (_):
                 probs, params = sess.run([model.probs, model.params], feed_dict=feed_dict)
 
                 boxes = model.vxl.generate_boxes(probs, params, np.array(model.priors, dtype=np.float32), FLAGS.anchor_th)
+                boxes = cpp.nms(boxes, 0.1)
                 boxes = boxes[0]
                 print(np.max(probs), len(boxes))
                 sample.load_voxelnet_boxes(boxes, 'Car')

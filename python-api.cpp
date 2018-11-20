@@ -67,6 +67,14 @@ namespace {
         };
     };
 
+    static float intersect (float min1, float max1, float min2, float max2) {
+        // intersection length of range [min1, max1] and [min2, max2]
+        float a = std::max(min1, min2);
+        float b = std::min(max1, max2);
+        if (a <= b) return b-a;
+        return 0;
+    }
+
     // 3D rotated box
     struct __attribute__((__packed__)) Box {
         static int constexpr DIM = 8;
@@ -77,6 +85,7 @@ namespace {
             };
         };
     public:
+
         void load (float const *params) {
             std::copy(params, params + DIM, data);
         }
@@ -87,6 +96,17 @@ namespace {
 
         py::tuple make_tuple () const {
             return py::make_tuple(x, y, z, h, w, l, t, s);
+        }
+
+        void from_tuple (py::tuple box) {
+            x = py::extract<float>(box[0]);
+            y = py::extract<float>(box[1]);
+            z = py::extract<float>(box[2]);
+            h = py::extract<float>(box[3]);
+            w = py::extract<float>(box[4]);
+            l = py::extract<float>(box[5]);
+            t = py::extract<float>(box[6]);
+            s = py::extract<float>(box[7]);
         }
 
         void to_residual (float ax, float ay, Prior const &, float *params) const {
@@ -104,15 +124,8 @@ namespace {
             h = params[3]; w = params[4]; l = params[5]; t = params[6];
         }
 
-        static float intersect (float min1, float max1, float min2, float max2) {
-            // intersection length of range [min1, max1] and [min2, max2]
-            float a = std::max(min1, min2);
-            float b = std::min(max1, max2);
-            if (a <= b) return b-a;
-            return 0;
-        }
-
         float score_anchor (float ax, float ay, Prior const &prior) const {
+            // approximate
             float a = x * x + y * y;
             float d = sqrt(a)/2;
             float p = prior.l * prior.w;
@@ -121,6 +134,17 @@ namespace {
             return i / (a + p - i + 0.00001);
         }
     };
+
+    float iou (Box const &a, Box const &b) {
+        // approximate
+        float aa = a.x * a.x + a.y * a.y;
+        float ab = b.x * b.x + b.y * b.y;   // area
+        float ra = sqrt(aa)/2;
+        float rb = sqrt(ab)/2;
+        float i = intersect(a.x-ra, a.x+ra, b.x-rb, b.x+rb)
+                * intersect(a.y-ra, a.y+ra, b.y-rb, b.y+rb);
+        return i / (aa + ab - i + 0.00001);
+    }
 
     // Give unmanaged memory an array-like accessment interface.
     template <typename T>
@@ -493,49 +517,44 @@ namespace {
         }
     };
 
-    /*
-    py::list nms (py::list np::ndarray probs, np::ndarray params, np::ndarray priors, float anchor_th) {
-        check_dense<float>(probs, 4);
-        check_dense<float>(params, 4);
-        check_dense<float>(priors, 2);
-        int batch = probs.shape(0);
-        int lx = probs.shape(1); //nx / downsize;
-        int ly = probs.shape(2); //ny / downsize;
-        CHECK(nx % lx == 0);
-        CHECK(ny % ly == 0);
-        int downsize = nx / lx;
-        CHECK(ny / ly == downsize);
-        CHECK(params.shape(1) == lx);
-        CHECK(params.shape(2) == ly);
-        CHECK(params.shape(3) % probs.shape(3) == 0);
-        CHECK(probs.shape(3) == priors.shape(0));
-        int n_params = params.shape(3) / probs.shape(3);
+    py::list nms (py::list inputs, float nms_th) {
+        py::list outputs;
+        for (int i = 0; i < len(inputs); ++i) {
+            vector<Box> boxes;
+            {
+                py::list list = py::extract<py::list>(inputs[i]);
+                for (int j = 0; j < len(list); ++j) {
+                    Box box;
+                    box.from_tuple(py::extract<py::tuple>(list[j]));
+                    boxes.push_back(box);
+                }
+            }
+            std::sort(boxes.begin(), boxes.end(), [](Box const &a, Box const &b) { return a.s > b.s; });
 
-        View<Prior> priors_view(priors);
+            vector<Box> keep;
+            for (auto const &box: boxes) {
+                bool good = true;
+                for (auto const &box2: keep) {
+                    if (iou(box, box2) >= nms_th) {
+                        good = false;
+                        break;
+                    }
+                }
+                if (good) {
+                    keep.push_back(box);
+                }
+            }
 
-        py::list list;
-        for (int i = 0; i < batch; ++i) {
-            float *pa = (float *)(probs.get_data() + probs.strides(0) * i);
-            float *pp = (float *)(params.get_data() + params.strides(0) * i);
-            py::list boxes;
-            for (int x = 0; x < lx; ++x) {
-                for (int y = 0; y < ly; ++y) {
-                    float ax(x * downsize / x_factor + x_min), ay(y * downsize / y_factor + y_min);
-                    // check all the priors
-                    for (int k = 0; k < probs.shape(3); ++k, pa += 1, pp += n_params) {
-                        float prob = pa[0];
-                        if (prob < anchor_th) continue;
-                        Box box;
-                        box.from_residual(ax, ay, priors_view[k], pp);
-                        boxes.append(box.make_tuple());
-                    } // prior
-                } // x
-            } // y
-            list.append(boxes);
-        } // batch
-        return list;
+            {
+                py::list list;
+                for (auto const &box: keep) {
+                    list.append(box.make_tuple());
+                }
+                outputs.append(list);
+            }
+        } 
+        return outputs;
     }
-    */
 
     struct Task {
         vector<string> paths;
@@ -630,5 +649,7 @@ BOOST_PYTHON_MODULE(cpp)
                 py::init<py::object, np::ndarray, np::ndarray, np::ndarray, int, int, float, float>())
         .def("next", &Streamer::next)
     ;
+
+    def("nms", ::nms);
 }
 
