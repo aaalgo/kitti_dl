@@ -1,6 +1,5 @@
 1. Proper rotated box IoU
 2. Augmentation
-3. Fix prior & residual calculation
 4. Non-maximum supression
 
 5. add points close to voxel boundary
