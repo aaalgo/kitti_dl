@@ -56,29 +56,17 @@ class Stream:
                     random.shuffle(samples)
                     pass
                 for pk in samples:
-                    sample = Sample(pk, LOAD_VELO | LOAD_LABEL2, is_training=True)
-                    # note that Sample's is_training is True for both training and validation
-                    meta = lambda: None
-                    setattr(meta, 'ids', np.zeros((1,)))
-
-                    points = sample.get_voxelnet_points()
-                    assert points.shape[1] == 4, 'channels should be %d.' % sample.points.shape[1]
-                    boxes = sample.get_voxelnet_boxes(["Car"])
-
-                    self.vxl.augment(points, boxes)
-                    points, mask, index = self.vxl.voxelize_points([points], T)
-                    anchors, anchors_weight, params, params_weight = self.vxl.voxelize_labels([boxes], np.array(self.priors, dtype=np.float32), FLAGS.rpn_stride)
-                    yield meta, points, mask, index, anchors, anchors_weight, params, params_weight
+                    yield ['kitti_data/training/cars.h5/%06d.h5' % pk]
                 if not self.is_training:
                     break
-        self.generator = generator()
+        self.impl = cpp.Streamer(generator(), RANGES, INPUT_SHAPE, np.array(self.priors, dtype=np.float32), FLAGS.rpn_stride, T, FLAGS.lower_th, FLAGS.upper_th)
         pass
 
     def size (self):
         return self.sz
 
     def next (self):
-        return next(self.generator)
+        return self.impl.next()
 
 def conv2d (net, ch, kernel, strides, is_training):
     net = tf.layers.conv2d(net, ch, kernel, strides, padding='same')
@@ -101,7 +89,7 @@ class VoxelNet (rpn.RPN):
 
     def __init__ (self):
         super().__init__()
-        self.vxl = cpp.Voxelizer(RANGES, INPUT_SHAPE, FLAGS.lower_th, FLAGS.upper_th)
+        self.vxl = cpp.Voxelizer(RANGES, INPUT_SHAPE)
         pass
 
     def vfe (self, net, mask):

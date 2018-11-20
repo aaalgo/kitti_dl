@@ -24,14 +24,14 @@ else:
     boost_python = 'boost_python%d%d' % (sys.version_info[0], sys.version_info[1])
     pass
 
-libraries.extend(['opencv_highgui', 'opencv_imgproc', 'opencv_core', 'boost_filesystem', 'boost_system', boost_numpy, boost_python, 'glog', 'gomp'])
+libraries.extend(['hdf5_hl', 'hdf5', 'boost_thread', 'boost_filesystem', 'boost_system', boost_numpy, boost_python, 'glog', 'gomp'])
 
 cpp = Extension('cpp',
         language = 'c++',
-        extra_compile_args = ['-O3', '-std=c++1y', '-g', '-fopenmp'], 
-		include_dirs = ['/usr/local/include', numpy_include],
+        extra_compile_args = ['-O3', '-std=c++1y', '-g'], 
+		include_dirs = ['/usr/lib/x86_64-linux-gnu/hdf5/serial/include', '/usr/local/include', numpy_include],
         libraries = libraries,
-        library_dirs = ['/usr/local/lib'],
+        library_dirs = ['/usr/lib/x86_64-linux-gnu/hdf5/serial/lib', '/usr/local/lib'],
 
         sources = ['python-api.cpp']
         )

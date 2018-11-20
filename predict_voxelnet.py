@@ -35,7 +35,7 @@ def main (_):
             for l in f:
                 pk = int(l.strip())
                 sample = Sample(pk, LOAD_IMAGE2 | LOAD_VELO | LOAD_LABEL2, is_training=is_val)
-                points = sample.get_voxlnet_points()
+                points = sample.get_voxelnet_points()
                 points, mask, index = model.vxl.voxelize_points([points], T)
                 feed_dict = {model.is_training: False,
                              model.points: points,
@@ -58,7 +58,7 @@ def main (_):
 
                 probs, params = sess.run([model.probs, model.params], feed_dict=feed_dict)
 
-                boxes = model.vxl.generate_boxes(probs, params, FLAGS.anchor_th)
+                boxes = model.vxl.generate_boxes(probs, params, np.array(model.priors, dtype=np.float32), FLAGS.anchor_th)
                 boxes = boxes[0]
                 print(np.max(probs), len(boxes))
                 sample.load_voxelnet_boxes(boxes, 'Car')

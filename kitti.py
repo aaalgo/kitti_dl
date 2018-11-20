@@ -41,6 +41,7 @@ def load_label2 (path):
                 # x, y, z in camera coordinate in meters
             obj.rot = float(line[14])                   # ry
                 # rotation ry around Y-axis in camera coordinates [-pi..pi]
+            obj.score = 1.0 #float(line[15])                   # ry
             objs.append(obj)
             pass
         pass
@@ -137,7 +138,7 @@ class Sample:
             if obj.type in types:
                 x, y, z = obj.loc
                 h, w, l = obj.dim
-                boxes.append([z, x, y, h, w, l, obj.rot, math.sqrt(w * w + l * l)])
+                boxes.append([z, x, y, h, w, l, obj.rot, obj.score])
                 pass
             pass
         if len(boxes) == 0:
@@ -149,9 +150,10 @@ class Sample:
         for row in array:
             box = empty_object()
             box.type = type1
-            z, x, y, h, w, l, box.rot, _ = row
+            z, x, y, h, w, l, box.rot, score = row
             box.loc = (x, y, z)
             box.dim = (h, w, l)
+            box.score = score
             boxes.append(box)
             pass
         self.label2 = boxes
