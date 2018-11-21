@@ -5,7 +5,12 @@
 #include <boost/ref.hpp>
 #include <boost/python.hpp>
 #include <boost/python/numpy.hpp>
-//#include <opencv2/opencv.hpp>
+#include <boost/numeric/ublas/matrix.hpp>
+#include <boost/numeric/ublas/io.hpp>
+#include <boost/geometry.hpp>
+#include <boost/geometry/geometries/point_xy.hpp>
+#include <boost/geometry/geometries/polygon.hpp>
+#include <boost/geometry/geometries/adapted/c_array.hpp>
 #include <glog/logging.h>
 #include <hdf5_hl.h>
 #include "streamer/streamer.h"
@@ -20,6 +25,8 @@ namespace {
     using std::cerr;
     using std::endl;
     using std::vector;
+
+    typedef boost::geometry::model::polygon<boost::geometry::model::d2::point_xy<float>> Polygon;
 
     static int PARAMS = 8;
     int random_seed = 2019;
@@ -126,13 +133,37 @@ namespace {
 
         float score_anchor (float ax, float ay, Prior const &prior) const {
             // approximate
-            float a = x * x + y * y;
+            float a = l * l + w * w;
             float d = sqrt(a)/2;
-            float p = prior.l * prior.w;
-            float i = intersect(x-d, x+d, ax-prior.l/2, ax+prior.l/2)   // intersection area
-                     * intersect(y-d, y+d, ay-prior.w/2, ay+prior.w/2);
-            return i / (a + p - i + 0.00001);
+            float a2 = prior.l * prior.l + prior.w * prior.w;
+            float d2 = sqrt(a2)/2;
+            float i = intersect(x-d, x+d, ax-d2, ax+d2)   // intersection area
+                     * intersect(y-d, y+d, ay-d2, ay+d2);
+            return i / (a + a2 - i + 0.00001);
         }
+
+		void polygon (Polygon *poly) const {
+			namespace bl = boost::numeric::ublas;
+			using namespace boost::geometry;
+			bl::matrix<float> mref(2, 2);
+            // we are using -t to calculate the matrix
+            // this is determined by visualization
+			mref(0, 0) = cos(t); mref(0, 1) = -sin(t);
+			mref(1, 0) = sin(t); mref(1, 1) = cos(t);
+
+			bl::matrix<float> corners(2, 4);
+			float data[] = {w / 2, w / 2, -w / 2, -w / 2,
+							l / 2, -l / 2, -l / 2, l / 2};
+			std::copy(data, data + 8, corners.data().begin());
+			bl::matrix<float> gc = prod(mref, corners);
+			for (int i = 0; i < 4; ++i) {
+				gc(0, i) += x;
+				gc(1, i) += y;
+			}
+
+			float points[][2] = {{gc(0, 0), gc(1, 0)},{gc(0, 1), gc(1, 1)},{gc(0, 2), gc(1, 2)},{gc(0, 3), gc(1, 3)},{gc(0, 0), gc(1, 0)}};
+			boost::geometry::append(*poly, points);
+		}
     };
 
     float iou (Box const &a, Box const &b) {
@@ -144,6 +175,15 @@ namespace {
         float i = intersect(a.x-ra, a.x+ra, b.x-rb, b.x+rb)
                 * intersect(a.y-ra, a.y+ra, b.y-rb, b.y+rb);
         return i / (aa + ab - i + 0.00001);
+    }
+
+    float iou (Polygon const &p1, Polygon const &p2) {
+        vector<Polygon> in, un;
+        boost::geometry::intersection(p1, p2, in);
+        boost::geometry::union_(p1, p2, un);
+        float inter_area = in.empty() ? 0 : boost::geometry::area(in.front());
+        float union_area = boost::geometry::area(un.front());
+        return inter_area / union_area;
     }
 
     // Give unmanaged memory an array-like accessment interface.
@@ -418,8 +458,7 @@ namespace {
                             }
                         }
                         pa += 1, paw +=1, pp += PARAMS, ppw += 1;
-                    } // prior
-                }} // y, x
+                }}} // prior, y, x
             } // batch
         }
 
@@ -515,6 +554,20 @@ namespace {
             } // batch
             return list;
         }
+
+        py::list box2polygon (py::tuple b) {
+            Box box;
+            box.from_tuple(b);
+            Polygon poly;
+            box.polygon(&poly);
+            py::list list;
+            for (auto const &p: poly.outer()) {
+                float x = (p.x() - x_min) * x_factor;
+                float y = (p.y() - y_min) * y_factor;
+                list.append(py::make_tuple(x, y));
+            }
+            return list;
+        }
     };
 
     py::list nms (py::list inputs, float nms_th) {
@@ -532,16 +585,21 @@ namespace {
             std::sort(boxes.begin(), boxes.end(), [](Box const &a, Box const &b) { return a.s > b.s; });
 
             vector<Box> keep;
+            vector<Polygon> polygons;
             for (auto const &box: boxes) {
+                Polygon polygon;
+                box.polygon(&polygon);
                 bool good = true;
-                for (auto const &box2: keep) {
-                    if (iou(box, box2) >= nms_th) {
+                for (auto const &polygon2: polygons) {
+
+                    if (iou(polygon, polygon2) >= nms_th) {
                         good = false;
                         break;
                     }
                 }
                 if (good) {
                     keep.push_back(box);
+                    polygons.push_back(polygon);
                 }
             }
 
@@ -607,6 +665,17 @@ namespace {
                 boxes_views.emplace_back(boxes.back());
             }
             delete task;
+            /*
+                if (boxes_views.back().size()) {
+                float min_z = boxes_views.back()[0].z;
+                float max_z = min_z;
+                for (Box const &b: boxes_views.back()) {
+                    min_z = std::min(min_z, b.z);
+                    max_z = std::max(max_z, b.z);
+                }
+                std::cerr << "MINMAX " << min_z << " " << max_z << std::endl;
+                }
+            */
 
             np::ndarray *V, *M, *I;
             np::ndarray *A, *AW, *P, *PW;
@@ -643,6 +712,7 @@ BOOST_PYTHON_MODULE(cpp)
         .def("make_dense", &Voxelizer::make_dense)
         .def("voxelize_labels", &Voxelizer::voxelize_labels)
         .def("generate_boxes", &Voxelizer::generate_boxes)
+        .def("box2polygon", &Voxelizer::box2polygon)
     ;
 
     py::class_<Streamer, boost::noncopyable>("Streamer",
