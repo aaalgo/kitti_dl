@@ -310,6 +310,7 @@ namespace {
         }
 
         void augment_helper (vector<View<Point>> &points_batch, vector<View<Box>> &boxes_batch, int seed) {
+            // TODO: per-box rotation
             CHECK(points_batch.size() == boxes_batch.size());
             std::default_random_engine rng1(seed);
             std::uniform_real_distribution<float> shiftxy(-0.5, 0.5);
