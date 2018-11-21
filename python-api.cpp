@@ -100,7 +100,10 @@ namespace {
             float ty = y * sc + dy;
             x = c * tx - s * ty;
             y = s * tx + c * ty;
-            z = z * sc * dz;
+            z = z * sc + dz;
+            h *= sc;
+            w *= sc;
+            l *= sc;
             t += dt;
         }
 
@@ -688,6 +691,7 @@ namespace {
     }
 
     struct Task {
+        py::object *inputs;
         vector<string> paths;
         int seed;
     };
@@ -701,29 +705,18 @@ namespace {
         Task *stage1 (py::object *obj) {
             Task *task = new Task;
             task->seed = rng();
+            task->inputs = obj;
             {
                 streamer::ScopedGState _;
                 int len = py::len(*obj);
                 for (int i = 0; i < len; ++i) {
                     task->paths.push_back(py::extract<string>((*obj)[i]));
                 }
-                delete obj;
             }
             return task;
         }
 
         py::object *stage2 (Task *task) {
-            /*
-            void augment (np::ndarray points, np::ndarray boxes) {
-                // rotate by z
-                // shift by z
-                std::uniform_real_distribution<float> scale(0.95, 1.05);
-                std::uniform_real_distribution<float> rotate(-M_PI/4, M_PI/4);
-                float s = scale(rng);
-                float r = rotate(rng);
-                // TODO
-            }
-            */
             // load from H5
             vector<vector<Point>> points;
             vector<vector<Box>> boxes;
@@ -740,7 +733,6 @@ namespace {
                 boxes_views.emplace_back(boxes.back());
             }
             augment_helper(points_views, boxes_views, task->seed);
-            delete task;
             /*
                 if (boxes_views.back().size()) {
                 float min_z = boxes_views.back()[0].z;
@@ -761,9 +753,11 @@ namespace {
             py::object *tuple;
             {
                 streamer::ScopedGState _;
-                tuple = new py::tuple(py::make_tuple(py::object(), *V, *M, *I, *A, *AW, *P, *PW));
+                tuple = new py::tuple(py::make_tuple(*task->inputs, *V, *M, *I, *A, *AW, *P, *PW));
+                delete task->inputs;
                 delete V; delete M; delete I; delete A; delete AW; delete P; delete PW;
             }
+            delete task;
             return tuple;
         }
     public:

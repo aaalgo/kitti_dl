@@ -150,10 +150,10 @@ class Sample:
         for row in array:
             box = empty_object()
             box.type = type1
-            z, x, y, h, w, l, box.rot, score = row
+            print(row)
+            z, x, y, h, w, l, box.rot, box.score = row
             box.loc = (x, y, z)
             box.dim = (h, w, l)
-            box.score = score
             boxes.append(box)
             pass
         self.label2 = boxes
