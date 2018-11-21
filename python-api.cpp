@@ -93,6 +93,17 @@ namespace {
         };
     public:
 
+        void augment (float sc, float dx, float dy, float dz, float dt, float s, float c) {
+            // s: sin(dt)
+            // c: cos(dt)
+            float tx = x * sc + dx;
+            float ty = y * sc + dy;
+            x = c * tx - s * ty;
+            y = s * tx + c * ty;
+            z = z * sc * dz;
+            t += dt;
+        }
+
         void load (float const *params) {
             std::copy(params, params + DIM, data);
         }
@@ -189,7 +200,7 @@ namespace {
     // Give unmanaged memory an array-like accessment interface.
     template <typename T>
     class View {
-        T const *data;
+        T *data;
         size_t sz;
     public:
         View (void *p, size_t s): data(reinterpret_cast<T *>(p)), sz(s) {
@@ -202,9 +213,13 @@ namespace {
 			sz = array.shape(0);
         }
 
-        View (vector<T> const &v) {
+        View (vector<T> &v) {
             data = &v[0];
             sz = v.size();
+        }
+
+        T &operator [] (size_t i) {
+            return data[i];
         }
 
         T const &operator [] (size_t i) const {
@@ -216,6 +231,8 @@ namespace {
 
         T const *begin () const { return data; }
         T const *end () const { return data + sz; }
+        T *begin () { return data; }
+        T *end () { return data + sz; }
     };
 
     class H5File {
@@ -258,6 +275,7 @@ namespace {
         float y_min, y_max, y_factor;
         float z_min, z_max, z_factor;
         int nx, ny, nz;
+    protected:
         std::default_random_engine rng;
     public:
         Voxelizer (np::ndarray ranges, np::ndarray shape): rng(random_seed) {
@@ -289,6 +307,60 @@ namespace {
             x_factor = (nx - 1) / x_range;
             y_factor = (ny - 1) / y_range;
             z_factor = (nz - 1) / z_range;
+        }
+
+        void augment_helper (vector<View<Point>> &points_batch, vector<View<Box>> &boxes_batch, int seed) {
+            CHECK(points_batch.size() == boxes_batch.size());
+            std::default_random_engine rng1(seed);
+            std::uniform_real_distribution<float> shiftxy(-0.5, 0.5);
+            std::uniform_real_distribution<float> shiftz(-0.2, 0.2);
+            std::uniform_real_distribution<float> shift2(-0.05, 0.05);
+            std::uniform_real_distribution<float> scale(0.95, 1.05);
+            std::uniform_real_distribution<float> rotate(-M_PI/4, M_PI/4);
+            //vector<float> r;
+            for (unsigned i = 0; i < points_batch.size(); ++i) {
+                float sc = scale(rng);
+                float dx = shiftxy(rng), dy = shiftxy(rng), dz = shiftz(rng);
+                float dt = rotate(rng);
+
+                View<Point> &points = points_batch[i];
+                View<Box> &boxes = boxes_batch[i];
+                //r.resize(points.size());
+                float s = sin(dt), c = cos(dt);
+
+                for (unsigned j = 0; j < points.size(); ++j) {
+                    Point &point = points[j];
+                    float x = point.x * sc + dx + shift2(rng);
+                    float y = point.y * sc + dy + shift2(rng);
+                    point.x = c * x - s * y;
+                    point.y = s * x + c * y;
+                    point.z = point.z * sc + dz + shift2(rng);
+                }
+
+                for (Box &box: boxes) {
+                    box.augment(sc, dx, dy, dz, dt, s, c);
+                }
+            }
+        }
+
+        void augment (py::list points_batch, py::list boxes_batch) {
+            int batch = py::len(boxes_batch);
+            CHECK(batch == py::len(points_batch));
+            vector<View<Point>> points_views;
+            vector<View<Box>> boxes_views;
+            for (int i = 0; i < batch; ++i) {
+                np::ndarray points = py::extract<np::ndarray>(points_batch[i]);
+                check_dense<float>(points, 2);
+                CHECK(points.shape(1) == 4);
+                points_views.emplace_back(points);
+
+                // foreach batch
+                np::ndarray boxes = py::extract<np::ndarray>(boxes_batch[i]);
+                check_dense<float>(boxes, 2);
+                CHECK(boxes.shape(1) == 8);
+                boxes_views.emplace_back(boxes);
+            }
+            augment_helper(points_views, boxes_views, rng());
         }
 
         static int quantize (float v, float min, float factor) {
@@ -616,6 +688,7 @@ namespace {
 
     struct Task {
         vector<string> paths;
+        int seed;
     };
 
     class Streamer: public streamer::Streamer<Task>, Voxelizer {
@@ -626,6 +699,7 @@ namespace {
 
         Task *stage1 (py::object *obj) {
             Task *task = new Task;
+            task->seed = rng();
             {
                 streamer::ScopedGState _;
                 int len = py::len(*obj);
@@ -664,6 +738,7 @@ namespace {
                 points_views.emplace_back(points.back());
                 boxes_views.emplace_back(boxes.back());
             }
+            augment_helper(points_views, boxes_views, task->seed);
             delete task;
             /*
                 if (boxes_views.back().size()) {
@@ -713,6 +788,7 @@ BOOST_PYTHON_MODULE(cpp)
         .def("voxelize_labels", &Voxelizer::voxelize_labels)
         .def("generate_boxes", &Voxelizer::generate_boxes)
         .def("box2polygon", &Voxelizer::box2polygon)
+        .def("augment", &Voxelizer::augment)
     ;
 
     py::class_<Streamer, boost::noncopyable>("Streamer",
