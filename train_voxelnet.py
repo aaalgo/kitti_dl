@@ -217,7 +217,7 @@ def setup_params ():
     FLAGS.lower_th = 0.15 #0.45
     FLAGS.upper_th = 0.60
     FLAGS.rpn_positive_extra = 0.5
-    FLAGS.decay_steps = 1000
+    FLAGS.decay_steps = 2000
     FLAGS.nms_th = 0.2
     pass
 
