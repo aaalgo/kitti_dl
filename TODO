@@ -1,3 +1,2 @@
-1. Proper rotated box IoU
-2. Augmentation
+2. per-box Augmentation
 5. add points close to voxel boundary
