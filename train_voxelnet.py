@@ -220,6 +220,7 @@ def setup_params ():
     FLAGS.rpn_positive_extra = 0.5
     FLAGS.decay_steps = 2000
     FLAGS.nms_th = 0.2
+    FLAGS.max_epochs = 5000
     pass
 
 def main (_):

@@ -26,10 +26,12 @@ namespace {
     using std::endl;
     using std::vector;
 
-    typedef boost::geometry::model::polygon<boost::geometry::model::d2::point_xy<float>> Polygon;
+    typedef boost::geometry::model::d2::point_xy<float> point_xy;
+    typedef boost::geometry::model::polygon<point_xy> Polygon;
 
     static int PARAMS = 8;
     int random_seed = 2019;
+    static float constexpr PIx2 = M_PI * 2;
 
     // sanity check np::ndarray to make sure they are dense and continuous
     template <typename T=float>
@@ -65,13 +67,18 @@ namespace {
     };
 
     struct __attribute__((__packed__)) Prior {
-        static int constexpr DIM = 2;
+        static int constexpr DIM = 5;
         union {
-            float data[2];
+            float data[5];
             struct {
-                float l, w; //, h, t;   // length is along x, width is along y
+                float l, w, h, z, qt; // length is along x, width is along y
             };
         };
+
+        float t () const {
+            return qt * M_PI / 2;
+        }
+        // qt = 0 1 2 -1
     };
 
     static float intersect (float min1, float max1, float min2, float max2) {
@@ -80,6 +87,14 @@ namespace {
         float b = std::min(max1, max2);
         if (a <= b) return b-a;
         return 0;
+    }
+
+    float norm_angle (float d) {
+        if (d >= PIx2) d -= PIx2;
+        else if (d <= -PIx2) d += PIx2;
+        float ad = d >= 0 ? (d - PIx2) : (d + PIx2);
+        if (abs(ad) < abs(d)) return ad;
+        return d;
     }
 
     // 3D rotated box
@@ -92,6 +107,16 @@ namespace {
             };
         };
     public:
+        void from_prior (Prior const &p, float ax, float ay) {
+            x = ax;
+            y = ay;
+            z = p.z;
+            h = p.h;
+            w = p.w;
+            l = p.l;
+            t = p.t();
+            s = 0;
+        }
 
         void augment (float sc, float dx, float dy, float dz, float dt, float s, float c) {
             // s: sin(dt)
@@ -130,19 +155,30 @@ namespace {
             s = py::extract<float>(box[7]);
         }
 
-        void to_residual (float ax, float ay, Prior const &, float *params) const {
+        void to_residual (float ax, float ay, Prior const &prior, float *params) const {
             // residual is the regression target
-            params[0] = x - ax;
-            params[1] = y - ay;
-            params[2] = z;
-            params[3] = h; params[4] = w; params[5] = l; params[6] = t; params[7] = 0;
+            float d = sqrt(prior.l * prior.l + prior.w * prior.w);
+
+            params[0] = (x - ax) / d;
+            params[1] = (y - ay) / d;
+            params[2] = (z - prior.z) / prior.z;
+            params[3] = (h - prior.h) / prior.h;
+            params[4] = (w - prior.w) / prior.w;
+            params[5] = (l - prior.l) / prior.l;
+            params[6] = norm_angle(t - prior.t()) / M_PI;
+            params[7] = 0;
         }
 
-        void from_residual (float ax, float ay, Prior const &, float const *params) {
-            x = params[0] + ax;
-            y = params[1] + ay;
-            z = params[2];
-            h = params[3]; w = params[4]; l = params[5]; t = params[6];
+        void from_residual (float ax, float ay, Prior const &prior, float const *params) {
+            float d = sqrt(prior.l * prior.l + prior.w * prior.w);
+
+            x = params[0] * d + ax;
+            y = params[1] * d + ay;
+            z = params[2] * prior.z + prior.z;
+            h = params[3] * prior.h + prior.h;
+            w = params[4] * prior.w + prior.w;
+            l = params[5] * prior.l + prior.l;
+            t = params[6] * M_PI + prior.t();
         }
 
         float score_anchor (float ax, float ay, Prior const &prior) const {
@@ -180,6 +216,7 @@ namespace {
 		}
     };
 
+#if 0
     float iou (Box const &a, Box const &b) {
         // approximate
         float aa = a.x * a.x + a.y * a.y;
@@ -190,6 +227,7 @@ namespace {
                 * intersect(a.y-ra, a.y+ra, b.y-rb, b.y+rb);
         return i / (aa + ab - i + 0.00001);
     }
+#endif
 
     float iou (Polygon const &p1, Polygon const &p2) {
         vector<Polygon> in, un;
@@ -509,17 +547,26 @@ namespace {
 
             int count = 0;
             for (auto const &boxes: boxes_batch) {
+                vector<Polygon> box_polygons(boxes.size());
+                for (unsigned i = 0; i < boxes.size(); ++i) {
+                    boxes[i].polygon(&box_polygons[i]);
+                }
                 for (int x = 0; x < lx; ++x) { for (int y = 0; y < ly; ++y) {
-                    float ax(x*downsize/x_factor+x_min);    // anchor location
-                    float ay(y*downsize/y_factor+y_min);
-                    for (auto const &prior: priors) {   // for each prior
+                    float ax(x*downsize/x_factor+x_min), ay(y*downsize/y_factor+y_min);
+                    for (auto const &prior: priors) {
+                        Box prior_box;
+                        Polygon prior_polygon;
+                        prior_box.from_prior(prior, ax, ay);
+                        prior_box.polygon(&prior_polygon);
                         Box const *best_box = nullptr;
                         float best_d = 0;
-                        for (auto const &box: boxes) {  // for each box
-                            float d = box.score_anchor(ax, ay, prior); 
+                        for (unsigned j = 0; j < boxes.size(); ++j) {
+                            float d = iou(prior_polygon, box_polygons[j]);
+                            float dt = abs(norm_angle(boxes[j].t - prior.t()));
+                            if (dt > 3 * M_PI/8) d = 0;
                             if (d > best_d) {   // find best circle
                                 best_d = d;
-                                best_box = &box;
+                                best_box = &boxes[j];
                             }
                         }
                         if (best_box && best_d >= lower_th) {

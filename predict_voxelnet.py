@@ -5,9 +5,9 @@ from gallery import Gallery
 flags = tf.app.flags
 flags.DEFINE_integer('max', 20, '')
 flags.DEFINE_string('gallery', None, '')
+flags.DEFINE_bool('test_labels', None, '')
 FLAGS = flags.FLAGS
 
-TEST_LABELS = False # test ground truth label generation
 
 def main (_):
     setup_params()
@@ -29,7 +29,8 @@ def main (_):
     with tf.Session(config=config) as sess:
         sess.run(tf.global_variables_initializer())
         sess.run(tf.local_variables_initializer())
-        saver.restore(sess, FLAGS.model)
+        if not FLAGS.test_labels:
+            saver.restore(sess, FLAGS.model)
 
         gal = Gallery('output', cols=columns)
         C = 0
@@ -47,7 +48,7 @@ def main (_):
                 if is_val:
                     # for validation set, produce the ground-truth boxes
                     boxes_gt = sample.get_voxelnet_boxes(["Car"])
-                    if TEST_LABELS:   # 2 lines below are for testing the C++ code
+                    if FLAGS.test_labels:   # 2 lines below are for testing the C++ code
                         probs, _, params, _ = model.vxl.voxelize_labels([boxes_gt], np.array(model.priors, dtype=np.float32), FLAGS.rpn_stride, FLAGS.lower_th, FLAGS.upper_th)
                     sample.load_voxelnet_boxes(boxes_gt, 'Car')
                     # visualize groundtruth labels
@@ -57,7 +58,7 @@ def main (_):
                         pass
                     cv2.imwrite(gal.next(), image3d)
 
-                if not TEST_LABELS:
+                if not FLAGS.test_labels:
                     probs, params = sess.run([model.probs, model.params], feed_dict=feed_dict)
 
                 boxes = model.vxl.generate_boxes(probs, params, np.array(model.priors, dtype=np.float32), FLAGS.anchor_th)
