@@ -172,13 +172,14 @@ class VoxelNet (rpn.RPN):
         V = Z * Y * X
         self.points = tf.placeholder(tf.float32, name='points', shape=(None, T, FLAGS.channels))
         self.mask = tf.placeholder(tf.float32, name='mask', shape=(None, T, 1))
-        self.index = tf.placeholder(tf.int32, name='index', shape=(None,))
+        self.index = tf.placeholder(tf.int32, name='index', shape=(None, 1))
 
         # we send a batch of voxels into the vfe_net
         # the shape of the 3D grid shouldn't concern vfe_net
         net = self.vfe(self.points, self.mask)
         # conver sparse voxels into dense 3D volume
-        net, = tf.py_func(self.vxl.make_dense, [net, self.index], [tf.float32])
+        net = tf.scatter_nd(self.index, net, [FLAGS.batch * V, 128])
+        #net, = tf.py_func(self.vxl.make_dense, [net, self.index], [tf.float32])
         net = tf.reshape(net, (FLAGS.batch, X, Y, Z, 128))
 
         self.voxel_features = net

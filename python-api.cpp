@@ -435,7 +435,7 @@ namespace {
                 streamer::ScopedGState _(lock);
                 V_buf = alloc_ndarray<>(py::make_tuple(N, T, C), V);
                 M_buf = alloc_ndarray<>(py::make_tuple(N, T, 1), M);
-                I_buf = alloc_ndarray<int32_t>(py::make_tuple(N), I);
+                I_buf = alloc_ndarray<int32_t>(py::make_tuple(N, 1), I);
             }
             // fill points into voxels
             for (unsigned j = 0; j < voxels.size(); ++j) {
@@ -555,36 +555,6 @@ namespace {
             py::tuple tuple = make_tuple(*A, *AW, *P, *PW);
             delete A; delete AW; delete P; delete PW;
             return tuple;
-        }
-
-        // put voxel feature to a dense grid of nx * ny * nz
-        // return value is a tuple of one ndarray; tuple is needed to meet TF API
-        py::tuple make_dense (np::ndarray P, np::ndarray I) {
-            check_dense<float>(P, 2);
-            int C = P.shape(1);
-            int nv = nx * ny * nz;
-            check_dense<int32_t>(I);
-            int N = P.shape(0);
-            CHECK(I.shape(0) == N);
-
-            // infer batch from last index in I
-            int batch = 0;
-            {
-                int32_t const *ii = (int32_t const *)(I.get_data() + (N-1) * I.strides(0));
-                batch = (ii[0] / nv) + 1;
-            }
-
-            np::ndarray V = np::zeros(py::make_tuple(batch, nx, ny, nz, C), np::dtype::get_builtin<float>());
-            check_dense<float>(V, 5);
-            float *vv = (float *)V.get_data();
-
-            for (int i = 0; i < N; ++i) {
-                float const *pp = (float const *)(P.get_data() + i * P.strides(0));
-                int32_t const *ii = (int32_t const *)(I.get_data() + i * I.strides(0));
-                float *oo = vv + ii[0] * C;
-                std::copy(pp, pp + C, oo);
-            }
-            return py::make_tuple(V);
         }
 
         py::list generate_boxes (np::ndarray probs, np::ndarray params, np::ndarray priors, float anchor_th) {
@@ -779,7 +749,6 @@ BOOST_PYTHON_MODULE(cpp)
     np::initialize();
     py::class_<Voxelizer, boost::noncopyable>("Voxelizer", py::init<np::ndarray, np::ndarray>())
         .def("voxelize_points", &Voxelizer::voxelize_points)
-        .def("make_dense", &Voxelizer::make_dense)
         .def("voxelize_labels", &Voxelizer::voxelize_labels)
         .def("generate_boxes", &Voxelizer::generate_boxes)
         .def("box2polygon", &Voxelizer::box2polygon)
