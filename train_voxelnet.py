@@ -216,7 +216,7 @@ def setup_params ():
     FLAGS.val_epochs = 10000
     FLAGS.rpn_stride = 2
     FLAGS.lower_th = 0.15 #0.45
-    FLAGS.upper_th = 0.60
+    FLAGS.upper_th = 0.3
     FLAGS.rpn_positive_extra = 0.5
     FLAGS.decay_steps = 2000
     FLAGS.nms_th = 0.2

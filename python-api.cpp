@@ -107,6 +107,19 @@ namespace {
             };
         };
     public:
+        bool sanity_check (Prior const &p, float ax, float ay) const {
+            if (h <= 0) return false;
+            if (w <= 0) return false;
+            if (l <= 0) return false;
+            if (h > 2) return false;
+            if (w > 2) return false;
+            if (l > 5) return false;
+            float d = sqrt(w * w + l * l);
+            float dist = sqrt((x-ax)*(x-ax) + (y-ay)*(y-ay));
+            if (d < dist) return false;
+            return true;
+        }
+
         void from_prior (Prior const &p, float ax, float ay) {
             x = ax;
             y = ay;
@@ -638,7 +651,9 @@ namespace {
                             Box box;
                             box.from_residual(ax, ay, prior, pp);
                             box.s = prob;
-                            boxes.append(box.make_tuple());
+                            if (box.sanity_check(prior, ax, ay)) {
+                                boxes.append(box.make_tuple());
+                            }
                         }
                         pa += 1, pp += PARAMS;
                     } // prior
