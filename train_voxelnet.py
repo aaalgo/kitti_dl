@@ -223,7 +223,6 @@ def setup_params ():
 
 def main (_):
     setup_params()
-    FLAGS.model = "vxlnet"
     model = VoxelNet()
     aardvark.train(model)
     pass

@@ -47,6 +47,17 @@ def load_label2 (path):
         pass
     return objs
 
+def save_label2 (path, objs):
+    # load label file, see kitti devkit readme.txt for doc
+    # example:
+    # Pedestrian 0.00 0 0.18 409.32 149.33 490.32 308.16 1.82 0.63 1.14 -1.80 1.46 8.47 -0.02
+    with open(path, 'w') as f:
+        for obj in objs:
+            f.write('%s 0 0 -10 %g %g %g %g %g %g %g %g %g %g %g %g\n' % (obj.type, obj.bbox[0], obj.bbox[1], obj.bbox[2], obj.bbox[3], obj.dim[0], obj.dim[1], obj.dim[2], obj.loc[0], obj.loc[1], obj.loc[2], obj.rot, obj.score))
+            pass
+        pass
+    pass
+
 def box3d_corners (obj):
     # get the 3D box corners of an object in camera space
     idx8 = [[0,0,0], [0,0,1], [0,1,1], [0,1,0],
@@ -150,10 +161,24 @@ class Sample:
         for row in array:
             box = empty_object()
             box.type = type1
-            print(row)
             z, x, y, h, w, l, box.rot, box.score = row
             box.loc = (x, y, z)
             box.dim = (h, w, l)
+
+            points = box3d_corners(box)
+            tmp = np.ones((points.shape[0], 4), dtype=np.float32)
+            tmp[:, :3] = points
+            points = tmp
+            points = points @ (self.calib.P2).T
+            points[:, 0] /= points[:, 2]
+            points[:, 1] /= points[:, 2]
+            #points = np.round(points[:, :2]).astype(np.int32)
+            left = np.min(points[:, 0])
+            right = np.max(points[:, 0])
+            top = np.min(points[:, 1])
+            bottom = np.max(points[:, 1])
+            box.bbox = [left, top, right, bottom]
+
             boxes.append(box)
             pass
         self.label2 = boxes
