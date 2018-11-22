@@ -108,16 +108,20 @@ namespace {
         };
     public:
         bool sanity_check (Prior const &p, float ax, float ay) const {
-            if (h <= 0) return false;
-            if (w <= 0) return false;
-            if (l <= 0) return false;
-            if (h > 2) return false;
-            if (w > 2) return false;
-            if (l > 5) return false;
-            float d = sqrt(w * w + l * l);
-            float dist = sqrt((x-ax)*(x-ax) + (y-ay)*(y-ay));
-            if (d < dist) return false;
-            return true;
+            do {
+                if (h <= 0) break;
+                if (w <= 0) break;
+                if (l <= 0) break;
+                if (h > 2) break;
+                if (w > 2) break;
+                if (l > 5) break;
+                float d = sqrt(w * w + l * l);
+                float dist = sqrt((x-ax)*(x-ax) + (y-ay)*(y-ay));
+                if (d < dist) break;
+                return true;
+            } while (false);
+            std::cerr << "BAD " << ax << ' ' << ay << ' ' << h << ' ' << w << ' ' << l << std::endl;
+            return false;
         }
 
         void from_prior (Prior const &p, float ax, float ay) {
@@ -172,8 +176,9 @@ namespace {
             // residual is the regression target
             float d = sqrt(prior.l * prior.l + prior.w * prior.w);
 
-            params[0] = (x - ax) / d;
-            params[1] = (y - ay) / d;
+            params[0] = (x - ax);
+            params[1] = (y - ay);
+            CHECK(abs(params[1]) < 8);
             params[2] = (z - prior.z) / prior.z;
             params[3] = (h - prior.h) / prior.h;
             params[4] = (w - prior.w) / prior.w;
@@ -184,9 +189,10 @@ namespace {
 
         void from_residual (float ax, float ay, Prior const &prior, float const *params) {
             float d = sqrt(prior.l * prior.l + prior.w * prior.w);
+            CHECK(d < 10);
 
-            x = params[0] * d + ax;
-            y = params[1] * d + ay;
+            x = params[0] + ax;
+            y = params[1] + ay;
             z = params[2] * prior.z + prior.z;
             h = params[3] * prior.h + prior.h;
             w = params[4] * prior.w + prior.w;
@@ -194,6 +200,7 @@ namespace {
             t = params[6] * M_PI + prior.t();
         }
 
+#if 0
         float score_anchor (float ax, float ay, Prior const &prior) const {
             // approximate
             float a = l * l + w * w;
@@ -204,6 +211,7 @@ namespace {
                      * intersect(y-d, y+d, ay-d2, ay+d2);
             return i / (a + a2 - i + 0.00001);
         }
+#endif
 
 		void polygon (Polygon *poly) const {
 			namespace bl = boost::numeric::ublas;
