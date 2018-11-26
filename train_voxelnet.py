@@ -11,6 +11,7 @@ from kitti import *
 
 flags = tf.app.flags
 flags.DEFINE_string('test_db', None, 'test db')
+flags.DEFINE_integer('seed', 2021, '')
                                 # db and val_db defined in aardvark.py
 FLAGS = flags.FLAGS
 
@@ -65,7 +66,7 @@ class Stream:
                     yield ['kitti_data/training/cars.h5/%06d.h5' % pk]
                 if not self.is_training:
                     break
-        self.impl = cpp.Streamer(generator(), RANGES, INPUT_SHAPE, np.array(self.priors, dtype=np.float32), FLAGS.rpn_stride, T, FLAGS.lower_th, FLAGS.upper_th)
+        self.impl = cpp.Streamer(generator(), RANGES, INPUT_SHAPE, np.array(self.priors, dtype=np.float32), FLAGS.rpn_stride, T, FLAGS.lower_th, FLAGS.upper_th, FLAGS.seed)
         pass
 
 def conv2d (net, ch, kernel, strides, is_training):

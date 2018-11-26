@@ -801,7 +801,7 @@ namespace {
             return tuple;
         }
     public:
-        Streamer (py::object gen,  np::ndarray ranges, np::ndarray shape, np::ndarray priors_, int downsize_, int T_, float lower_th_, float upper_th_)
+        Streamer (py::object gen,  np::ndarray ranges, np::ndarray shape, np::ndarray priors_, int downsize_, int T_, float lower_th_, float upper_th_, int seed)
             : streamer::Streamer<Task>(gen, 6),
             Voxelizer(ranges, shape),
             priors(priors_),
@@ -810,6 +810,9 @@ namespace {
             lower_th(lower_th_),
             upper_th(upper_th_)
         {
+            if (seed > 0) {
+                rng = std::default_random_engine(seed);
+            }
         }
     };
 }
@@ -826,7 +829,7 @@ BOOST_PYTHON_MODULE(cpp)
     ;
 
     py::class_<Streamer, boost::noncopyable>("Streamer",
-                py::init<py::object, np::ndarray, np::ndarray, np::ndarray, int, int, float, float>())
+                py::init<py::object, np::ndarray, np::ndarray, np::ndarray, int, int, float, float, int>())
         .def("next", &Streamer::next)
     ;
 
