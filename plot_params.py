@@ -27,7 +27,7 @@ T = []
 
 sp.check_call('mkdir -p stats', shell=True)
 
-with open('kitti_data/train.txt', 'r') as f:
+with open('train.txt', 'r') as f:
     tasks = [int(l.strip()) for l in f]
 for pk in tqdm(tasks):
     sample = Sample(pk, LOAD_LABEL2)

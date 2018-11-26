@@ -38,5 +38,5 @@ def import_set (list_path):
         pass
     pass
 
-import_set('kitti_data/trainval.txt')
+import_set('trainval.txt')
 

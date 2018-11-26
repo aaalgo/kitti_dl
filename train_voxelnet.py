@@ -63,7 +63,7 @@ class Stream:
                     random.shuffle(samples)
                     pass
                 for pk in samples:
-                    yield ['kitti_data/training/cars.h5/%06d.h5' % pk]
+                    yield ['training/cars.h5/%06d.h5' % pk]
                 if not self.is_training:
                     break
         self.impl = cpp.Streamer(generator(), RANGES, INPUT_SHAPE, np.array(self.priors, dtype=np.float32), FLAGS.rpn_stride, T, FLAGS.lower_th, FLAGS.upper_th, FLAGS.seed)
@@ -209,9 +209,9 @@ class VoxelNet (rpn.RPN):
 def setup_params ():
     FLAGS.channels = 7
     FLAGS.classes = None    # we shouldn't need this
-    FLAGS.db = 'kitti_data/train.txt'
-    FLAGS.val_db = 'kitti_data/val.txt'
-    FLAGS.test_db = 'kitti_data/test.txt'
+    FLAGS.db = 'train.txt'
+    FLAGS.val_db = 'val.txt'
+    FLAGS.test_db = 'test.txt'
     FLAGS.epoch_steps = 100
     FLAGS.ckpt_epochs = 1
     FLAGS.val_epochs = 10000

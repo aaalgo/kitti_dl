@@ -23,4 +23,14 @@ kitti_data/training/velodyne
 
 ```
 
+2. Preprocess Data
+```
+./import_cars.py
+```
+
+3. Train
+```
+./train_voxelnet.py 
+```
+Models will be saved in the directory vxlnet.
 
