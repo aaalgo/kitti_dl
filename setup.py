@@ -19,9 +19,10 @@ if sys.version_info[0] < 3:
 else:
     if os.path.exists('/usr/local/lib/libboost_python3.so'):
         boost_numpy = 'boost_numpy3'
+        boost_python = 'boost_python3'
     else:
         boost_numpy = 'boost_numpy%d%d' % (sys.version_info[0], sys.version_info[1])
-    boost_python = 'boost_python%d%d' % (sys.version_info[0], sys.version_info[1])
+        boost_python = 'boost_python%d%d' % (sys.version_info[0], sys.version_info[1])
     pass
 
 libraries.extend(['hdf5_hl', 'hdf5', 'boost_thread', 'boost_filesystem', 'boost_system', boost_numpy, boost_python, 'glog', 'gomp'])
