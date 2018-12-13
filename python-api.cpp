@@ -2,6 +2,7 @@
 #include <vector>
 #include <sstream>
 #include <iostream>
+#include <random>
 #include <boost/ref.hpp>
 #include <boost/python.hpp>
 #include <boost/python/numpy.hpp>
