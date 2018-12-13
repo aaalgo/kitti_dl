@@ -17,7 +17,7 @@ if sys.version_info[0] < 3:
     boost_numpy = 'boost_numpy'
     boost_python = 'boost_python'
 else:
-    if os.path.exists('/usr/local/lib/libboost_python3.so'):
+    if os.path.exists('/usr/local/lib/libboost_python3.so') or os.path.exists('/usr/lib/x86_64-linux-gnu/libboost_python3.so'):
         boost_numpy = 'boost_numpy3'
         boost_python = 'boost_python3'
     else:
