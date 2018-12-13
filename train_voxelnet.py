@@ -63,7 +63,7 @@ class Stream:
                     random.shuffle(samples)
                     pass
                 for pk in samples:
-                    yield ['training/cars.h5/%06d.h5' % pk]
+                    yield ['kitti_data/training/cars.h5/%06d.h5' % pk]
                 if not self.is_training:
                     break
         self.impl = cpp.Streamer(generator(), RANGES, INPUT_SHAPE, np.array(self.priors, dtype=np.float32), FLAGS.rpn_stride, T, FLAGS.lower_th, FLAGS.upper_th, FLAGS.seed)
